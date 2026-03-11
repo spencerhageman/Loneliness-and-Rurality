@@ -1,0 +1,89 @@
+# ============================================================
+# SECTION 1: LOAD CHAS DATA
+# ============================================================
+# Replace "your_chas_data.csv" with the actual path to the CHAS file.
+# The script assumes the dataset contains at minimum:
+#   hsr       - Health Statistics Region (integer 1-21)
+#   lone_q1   - Loneliness Question 1  (1/2/3 or "." or 77)
+#   lone_q2   - Loneliness Question 2  (1/2/3 or "." or 77)
+#   lone_q3   - Loneliness Question 3  (1/2/3 or "." or 77)
+#   education - Education level (categorical)
+#
+# Adjust column names below to match your actual variable names.
+
+# chas_raw <- read_csv("your_chas_data.csv", na = c("", "NA"))
+
+
+# ============================================================
+# SECTION 2: FILTER & RECODE LONELINESS VARIABLES
+# ============================================================
+# Loneliness questions: lone_q1, lone_q2, lone_q3
+# Exclude: "." (missing / period) and 77 (don't know)
+# Recode: 1 → "Did Not Experience"; 2 or 3 → "Experienced"
+
+# ── 3a. Convert to numeric, coercing "." to NA ────────────────
+# chas <- chas %>%
+#   mutate(across(c(lone_q1, lone_q2, lone_q3),
+#                 ~ suppressWarnings(as.numeric(.x))))
+
+# ── 3b. Exclude rows where ANY loneliness question = NA or 77 ─
+# n_before <- nrow(chas)
+#
+# chas_clean <- chas %>%
+#   filter(
+#     !is.na(lone_q1), lone_q1 != 77,
+#     !is.na(lone_q2), lone_q2 != 77,
+#     !is.na(lone_q3), lone_q3 != 77
+#   )
+#
+# n_after <- nrow(chas_clean)
+# cat(sprintf("\nObservations before exclusion : %d\n", n_before))
+# cat(sprintf("Observations excluded         : %d\n", n_before - n_after))
+# cat(sprintf("Observations remaining        : %d\n", n_after))
+
+# ── 3c. Binary recode ─────────────────────────────────────────
+# chas_clean <- chas_clean %>%
+#   mutate(
+#     lone_q1_bin = if_else(lone_q1 == 1, "Did Not Experience", "Experienced"),
+#     lone_q2_bin = if_else(lone_q2 == 1, "Did Not Experience", "Experienced"),
+#     lone_q3_bin = if_else(lone_q3 == 1, "Did Not Experience", "Experienced"),
+#
+#     # Factor versions (useful for modelling / plotting)
+#     lone_q1_fct = factor(lone_q1_bin,
+#                          levels = c("Did Not Experience", "Experienced")),
+#     lone_q2_fct = factor(lone_q2_bin,
+#                          levels = c("Did Not Experience", "Experienced")),
+#     lone_q3_fct = factor(lone_q3_bin,
+#                          levels = c("Did Not Experience", "Experienced"))
+#   )
+
+# cat("\n=== Binary Loneliness Recode – Value Counts ===\n")
+# for (q in c("lone_q1_bin", "lone_q2_bin", "lone_q3_bin")) {
+#   cat(sprintf("\n%s:\n", q))
+#   print(table(chas_clean[[q]], useNA = "always"))
+# }
+
+# -- 3d. Education binary recode -----------------------------------------------
+# Original CHAS education categories (adjust numeric values to match your codebook):
+#   1 = Less than high school
+#   2 = High school diploma or GED
+#   3 = Some college or technical school
+#   4 = College graduate (Bachelor's degree)
+#   5 = Post-graduate degree
+#
+# Recode: 1-3 -> "No college degree"
+#         4-5 -> "College degree or more"
+
+# chas_clean <- chas_clean %>%
+#   mutate(
+#     education_bin = case_when(
+#       education %in% 1:3 ~ "No college degree",
+#       education %in% 4:5 ~ "College degree or more",
+#       TRUE               ~ NA_character_
+#     ),
+#     education_fct = factor(education_bin,
+#                            levels = c("No college degree", "College degree or more"))
+#   )
+
+# cat("\n=== Education Binary Recode – Value Counts ===\n")
+# print(table(chas_clean$education_bin, useNA = "always"))
