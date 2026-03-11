@@ -1,0 +1,338 @@
+# ============================================================
+# Colorado Loneliness & Urban/Rural Research Project
+# Data: 2025 Colorado Health Access Survey (CHAS)
+# ============================================================
+
+library(tidyverse)
+library(ggplot2)
+library(sf)
+library(tigris)      # For Colorado county shapefiles
+library(scales)
+library(ggrepel)     # For non-overlapping map labels
+
+options(tigris_use_cache = TRUE)
+
+# ============================================================
+# SECTION 1: HSR RURAL/URBAN CLASSIFICATION
+# ============================================================
+# Health Statistics Regions (HSR 1–21) with county compositions
+# and binary Rural/Urban classifications per CHAS definitions.
+#
+# Classification scheme (HSR level):
+#   "Urban" – HSR is composed entirely of urban counties
+#   "Rural" – HSR contains rural and/or rural resort counties
+#             (Rural Resort is a county-level distinction only;
+#              at the HSR level all non-urban regions = "Rural")
+#
+# Urban HSRs  : 2, 3, 4, 7, 14, 15, 16, 18, 19, 20, 21
+# Rural HSRs  : 1, 5, 6, 8, 9, 10, 11, 12, 13, 17
+
+hsr_data <- tribble(
+  ~hsr, ~hsr_name,             ~counties,                                                          ~rural_urban,
+  1,    "Northeast",           "Logan, Washington, Yuma, Phillips, Sedgwick, Morgan",              "Rural",
+  2,    "Larimer",             "Larimer",                                                           "Urban",
+  3,    "Douglas",             "Douglas",                                                           "Urban",
+  4,    "El Paso",             "El Paso",                                                           "Urban",
+  5,    "East Central",        "Lincoln, Elbert, Kit Carson, Cheyenne",                            "Rural",
+  6,    "Southeast",           "Las Animas, Baca, Prowers, Bent, Kiowa, Otero, Crowley, Huerfano", "Rural",
+  7,    "Pueblo",              "Pueblo",                                                            "Urban",
+  8,    "San Luis Valley",     "Mineral, Costilla, Conejos, Alamosa, Saguache, Rio Grande",        "Rural",
+  9,    "Southwest",           "Dolores, Montezuma, La Plata, San Juan, Archuleta",                "Rural",
+  10,   "Western Slope",       "Gunnison, Delta, Montrose, Ouray, San Miguel, Hinsdale",           "Rural",
+  11,   "Northwest",           "Jackson, Routt, Moffat, Rio Blanco",                               "Rural",
+  12,   "Central Mountains",   "Garfield, Pitkin, Eagle, Summit, Grand",                           "Rural",
+  13,   "Upper Arkansas",      "Lake, Chaffee, Fremont, Custer",                                   "Rural",
+  14,   "Adams",               "Adams",                                                             "Urban",
+  15,   "Arapahoe",            "Arapahoe",                                                          "Urban",
+  16,   "Boulder/Broomfield",  "Boulder, Broomfield",                                              "Urban",
+  17,   "Foothills",           "Park, Teller, Clear Creek, Gilpin",                                "Rural",
+  18,   "Weld",                "Weld",                                                              "Urban",
+  19,   "Mesa",                "Mesa",                                                              "Urban",
+  20,   "Denver",              "Denver",                                                            "Urban",
+  21,   "Jefferson",           "Jefferson",                                                         "Urban"
+)
+
+# Binary rural vs. urban variable (Urban = 0, Rural = 1)
+hsr_data <- hsr_data %>%
+  mutate(
+    rural_binary = if_else(rural_urban == "Urban", 0L, 1L)
+  )
+
+cat("=== HSR Classification Table ===\n")
+print(hsr_data %>% select(hsr, hsr_name, counties, rural_urban, rural_binary))
+
+# ============================================================
+# SECTION 2: COUNTY–LEVEL LOOKUP (for mapping)
+# ============================================================
+# Maps every Colorado county to its HSR and county-level designation.
+# Note: "Rural Resort" is retained HERE at the county level for mapping.
+# At the HSR level (Section 1), all non-urban regions are simply "Rural".
+
+county_hsr_lookup <- tribble(
+  ~county,        ~hsr, ~county_type,
+  # ── HSR 1: Northeast (Rural) ──────────────────────────────
+  "Logan",          1,  "Rural",
+  "Washington",     1,  "Rural",
+  "Yuma",           1,  "Rural",
+  "Phillips",       1,  "Rural",
+  "Sedgwick",       1,  "Rural",
+  "Morgan",         1,  "Rural",
+  # ── HSR 2: Larimer (Urban) ────────────────────────────────
+  "Larimer",        2,  "Urban",
+  # ── HSR 3: Douglas (Urban) ────────────────────────────────
+  "Douglas",        3,  "Urban",
+  # ── HSR 4: El Paso (Urban) ────────────────────────────────
+  "El Paso",        4,  "Urban",
+  # ── HSR 5: East Central (Rural) ───────────────────────────
+  "Lincoln",        5,  "Rural",
+  "Elbert",         5,  "Rural",
+  "Kit Carson",     5,  "Rural",
+  "Cheyenne",       5,  "Rural",
+  # ── HSR 6: Southeast (Rural) ──────────────────────────────
+  "Las Animas",     6,  "Rural",
+  "Baca",           6,  "Rural",
+  "Prowers",        6,  "Rural",
+  "Bent",           6,  "Rural",
+  "Kiowa",          6,  "Rural",
+  "Otero",          6,  "Rural",
+  "Crowley",        6,  "Rural",
+  "Huerfano",       6,  "Rural",
+  # ── HSR 7: Pueblo (Urban) ─────────────────────────────────
+  "Pueblo",         7,  "Urban",
+  # ── HSR 8: San Luis Valley (Rural) ────────────────────────
+  "Mineral",        8,  "Rural",
+  "Costilla",       8,  "Rural",
+  "Conejos",        8,  "Rural",
+  "Alamosa",        8,  "Rural",
+  "Saguache",       8,  "Rural",
+  "Rio Grande",     8,  "Rural",
+  # ── HSR 9: Southwest (Rural Resort) ───────────────────────
+  "Dolores",        9,  "Rural Resort",
+  "Montezuma",      9,  "Rural Resort",
+  "La Plata",       9,  "Rural Resort",
+  "San Juan",       9,  "Rural Resort",
+  "Archuleta",      9,  "Rural Resort",
+  # ── HSR 10: Western Slope (Rural Resort) ──────────────────
+  "Gunnison",      10,  "Rural Resort",
+  "Delta",         10,  "Rural Resort",
+  "Montrose",      10,  "Rural Resort",
+  "Ouray",         10,  "Rural Resort",
+  "San Miguel",    10,  "Rural Resort",
+  "Hinsdale",      10,  "Rural Resort",
+  # ── HSR 11: Northwest (Rural) ─────────────────────────────
+  "Jackson",       11,  "Rural",
+  "Routt",         11,  "Rural",
+  "Moffat",        11,  "Rural",
+  "Rio Blanco",    11,  "Rural",
+  # ── HSR 12: Central Mountains (Rural Resort) ──────────────
+  "Garfield",      12,  "Rural Resort",
+  "Pitkin",        12,  "Rural Resort",
+  "Eagle",         12,  "Rural Resort",
+  "Summit",        12,  "Rural Resort",
+  "Grand",         12,  "Rural Resort",
+  # ── HSR 13: Upper Arkansas (Rural) ────────────────────────
+  "Lake",          13,  "Rural",
+  "Chaffee",       13,  "Rural",
+  "Fremont",       13,  "Rural",
+  "Custer",        13,  "Rural",
+  # ── HSR 14: Adams (Urban) ─────────────────────────────────
+  "Adams",         14,  "Urban",
+  # ── HSR 15: Arapahoe (Urban) ──────────────────────────────
+  "Arapahoe",      15,  "Urban",
+  # ── HSR 16: Boulder/Broomfield (Urban) ────────────────────
+  "Boulder",       16,  "Urban",
+  "Broomfield",    16,  "Urban",
+  # ── HSR 17: Foothills (Rural Resort) ──────────────────────
+  "Park",          17,  "Rural Resort",
+  "Teller",        17,  "Urban",
+  "Clear Creek",   17,  "Rural Resort",
+  "Gilpin",        17,  "Rural Resort",
+  # ── HSR 18: Weld (Urban) ──────────────────────────────────
+  "Weld",          18,  "Urban",
+  # ── HSR 19: Mesa (Urban) ──────────────────────────────────
+  "Mesa",          19,  "Urban",
+  # ── HSR 20: Denver (Urban) ────────────────────────────────
+  "Denver",        20,  "Urban",
+  # ── HSR 21: Jefferson (Urban) ─────────────────────────────
+  "Jefferson",     21,  "Urban"
+)
+
+
+# ============================================================
+# SECTION 3: MAPS
+# ============================================================
+
+# ── 5a. Download Colorado county shapefiles ───────────────────
+co_counties_sf <- counties(state = "CO", cb = TRUE, resolution = "5m") %>%
+  st_transform(crs = 26913)   # NAD83 / UTM Zone 13N – good for Colorado
+
+# Standardise county name column and join lookup
+co_counties_sf <- co_counties_sf %>%
+  rename(county = NAME) %>%
+  left_join(county_hsr_lookup, by = "county")
+
+# HSR centroids for labelling
+hsr_centroids <- co_counties_sf %>%
+  group_by(hsr) %>%
+  summarise(geometry = st_union(geometry)) %>%
+  st_centroid() %>%
+  left_join(hsr_data %>% select(hsr, hsr_name), by = "hsr")
+
+
+# ── Colour palettes ───────────────────────────────────────────
+county_palette <- c(
+  "Urban"        = "#2166AC",   # blue
+  "Rural Resort" = "#74C476",   # green
+  "Rural"        = "#D6604D"    # red-orange
+)
+
+hsr_palette <- setNames(
+  colorRampPalette(c("#E8F4F8", "#084594"))(21),
+  1:21
+)
+
+
+# ────────────────────────────────────────────────────────────
+# MAP 1 – County-level Rural / Rural Resort / Urban
+# ────────────────────────────────────────────────────────────
+
+# Compute county centroids for labels
+county_centroids <- co_counties_sf %>%
+  st_centroid()
+
+map1 <- ggplot(co_counties_sf) +
+  geom_sf(aes(fill = county_type), colour = "white", linewidth = 0.3) +
+  geom_sf_text(data = county_centroids,
+               aes(label = county),
+               size = 1.7, colour = "white", fontface = "bold") +
+  scale_fill_manual(
+    values   = county_palette,
+    name     = "County Classification",
+    na.value = "grey80"
+  ) +
+  labs(
+    title    = "Colorado Counties by Rural/Urban Classification",
+    subtitle = "Based on CDPHE Health Statistics Region Designations",
+    caption  = "Source: 2025 Colorado Health Access Survey (CHAS)"
+  ) +
+  theme_void(base_size = 13) +
+  theme(
+    plot.title    = element_text(face = "bold", hjust = 0.5, size = 15),
+    plot.subtitle = element_text(hjust = 0.5, colour = "grey40"),
+    plot.caption  = element_text(hjust = 1,  colour = "grey50", size = 9),
+    legend.position   = "bottom",
+    legend.title      = element_text(face = "bold"),
+    plot.margin       = margin(10, 10, 10, 10)
+  )
+
+ggsave("map1_county_classification.png", map1,
+       width = 11, height = 7.5, dpi = 300, bg = "white")
+cat("\nMap 1 saved: map1_county_classification.png\n")
+
+
+# ────────────────────────────────────────────────────────────
+# MAP 2 – Health Statistics Regions (HSRs 1–21)
+# ────────────────────────────────────────────────────────────
+
+# Dissolve counties into HSR polygons
+hsr_sf <- co_counties_sf %>%
+  group_by(hsr) %>%
+  summarise(geometry = st_union(geometry), .groups = "drop") %>%
+  left_join(hsr_data %>% select(hsr, hsr_name, rural_urban), by = "hsr")
+
+map2 <- ggplot() +
+  # HSR fills
+  geom_sf(data = hsr_sf,
+          aes(fill = factor(hsr)),
+          colour = "white", linewidth = 0.6) +
+  # County borders (thin, semi-transparent)
+  geom_sf(data = co_counties_sf,
+          fill = NA, colour = "white", linewidth = 0.15, alpha = 0.5) +
+  # HSR number labels
+  geom_sf_text(data = hsr_centroids,
+               aes(label = hsr),
+               size = 3.2, fontface = "bold", colour = "white") +
+  scale_fill_manual(
+    values = hsr_palette,
+    name   = "HSR",
+    guide  = guide_legend(ncol = 7, title.position = "top")
+  ) +
+  labs(
+    title    = "Colorado Health Statistics Regions (HSR 1–21)",
+    subtitle = "Each region is composed of one or more counties",
+    caption  = "Source: CDPHE / 2025 Colorado Health Access Survey (CHAS)"
+  ) +
+  theme_void(base_size = 13) +
+  theme(
+    plot.title    = element_text(face = "bold", hjust = 0.5, size = 15),
+    plot.subtitle = element_text(hjust = 0.5, colour = "grey40"),
+    plot.caption  = element_text(hjust = 1,  colour = "grey50", size = 9),
+    legend.position   = "bottom",
+    legend.title      = element_text(face = "bold"),
+    plot.margin       = margin(10, 10, 10, 10)
+  )
+
+ggsave("map2_hsr_regions.png", map2,
+       width = 11, height = 7.5, dpi = 300, bg = "white")
+cat("Map 2 saved: map2_hsr_regions.png\n")
+
+
+# ────────────────────────────────────────────────────────────
+# MAP 3 – HSR Rural/Urban Designation + HSR number labels
+# Fill reflects the HSR-level binary classification (Rural/Urban),
+# with county borders shown faintly within each HSR.
+# ────────────────────────────────────────────────────────────
+
+hsr_rurban_palette <- c(
+  "Urban" = "#2166AC",   # blue
+  "Rural" = "#D6604D"    # red-orange
+)
+
+map3 <- ggplot() +
+  # HSR fill = HSR-level Rural/Urban designation
+  geom_sf(data = hsr_sf,
+          aes(fill = rural_urban),
+          colour = "#1a1a1a", linewidth = 0.7) +
+  # County borders within HSRs (thin, light)
+  geom_sf(data = co_counties_sf,
+          fill = NA, colour = "white", linewidth = 0.2) +
+  # HSR number labels at centroids
+  geom_label(
+    data = st_coordinates(hsr_centroids) %>%
+      as_tibble() %>%
+      bind_cols(hsr_centroids %>% st_drop_geometry()),
+    aes(x = X, y = Y, label = hsr),
+    size = 2.8, fontface = "bold",
+    fill  = "white", colour = "#1a1a1a",
+    label.size = 0.25, label.padding = unit(0.15, "lines"),
+    alpha = 0.85
+  ) +
+  scale_fill_manual(
+    values   = hsr_rurban_palette,
+    name     = "HSR Classification",
+    na.value = "grey80"
+  ) +
+  labs(
+    title    = "Colorado Health Statistics Regions by Rural/Urban Designation",
+    subtitle = "Fill = HSR-level classification  ·  Numbers = HSR ID",
+    caption  = "Source: CDPHE / 2025 Colorado Health Access Survey (CHAS)"
+  ) +
+  theme_void(base_size = 13) +
+  theme(
+    plot.title    = element_text(face = "bold", hjust = 0.5, size = 15),
+    plot.subtitle = element_text(hjust = 0.5, colour = "grey40", size = 10),
+    plot.caption  = element_text(hjust = 1,  colour = "grey50", size = 9),
+    legend.position   = "bottom",
+    legend.title      = element_text(face = "bold"),
+    plot.margin       = margin(10, 10, 10, 10)
+  )
+
+ggsave("map3_hsr_rural_urban.png", map3,
+       width = 12, height = 8, dpi = 300, bg = "white")
+cat("Map 3 saved: map3_hsr_rural_urban.png\n")
+
+cat("\n=== Script complete. ===\n")
+cat("Next steps:\n")
+cat("  1. Load your CHAS data and uncomment Sections 2 & 3.\n")
+cat("  2. Adjust column names (lone_q1, lone_q2, lone_q3) to match your dataset.\n")
+cat("  3. Run the full script to generate filtered data + all three maps.\n")
