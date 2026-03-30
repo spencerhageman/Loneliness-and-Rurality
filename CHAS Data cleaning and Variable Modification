@@ -1,89 +1,254 @@
-# ============================================================
-# SECTION 1: LOAD CHAS DATA
-# ============================================================
-# Replace "your_chas_data.csv" with the actual path to the CHAS file.
-# The script assumes the dataset contains at minimum:
-#   hsr       - Health Statistics Region (integer 1-21)
-#   lone_q1   - Loneliness Question 1  (1/2/3 or "." or 77)
-#   lone_q2   - Loneliness Question 2  (1/2/3 or "." or 77)
-#   lone_q3   - Loneliness Question 3  (1/2/3 or "." or 77)
-#   education - Education level (categorical)
-#
-# Adjust column names below to match your actual variable names.
-
-# chas_raw <- read_csv("your_chas_data.csv", na = c("", "NA"))
+library(tidyverse)
+library(ggplot2)
+library(scales)
 
 
-# ============================================================
-# SECTION 2: FILTER & RECODE LONELINESS VARIABLES
-# ============================================================
-# Loneliness questions: lone_q1, lone_q2, lone_q3
-# Exclude: "." (missing / period) and 77 (don't know)
-# Recode: 1 → "Did Not Experience"; 2 or 3 → "Experienced"
+chas <- read_csv("/Users/spencerhageman/Documents/Research Methods/CHAS25_RESEARCH_CSU.csv", na = c("", "NA", "."))
 
-# ── 3a. Convert to numeric, coercing "." to NA ────────────────
-# chas <- chas %>%
-#   mutate(across(c(lone_q1, lone_q2, lone_q3),
-#                 ~ suppressWarnings(as.numeric(.x))))
+#-------------------------------------------------------------------------------------------------------------------------
 
-# ── 3b. Exclude rows where ANY loneliness question = NA or 77 ─
-# n_before <- nrow(chas)
-#
-# chas_clean <- chas %>%
-#   filter(
-#     !is.na(lone_q1), lone_q1 != 77,
-#     !is.na(lone_q2), lone_q2 != 77,
-#     !is.na(lone_q3), lone_q3 != 77
-#   )
-#
-# n_after <- nrow(chas_clean)
-# cat(sprintf("\nObservations before exclusion : %d\n", n_before))
-# cat(sprintf("Observations excluded         : %d\n", n_before - n_after))
-# cat(sprintf("Observations remaining        : %d\n", n_after))
+# Filter and Recode Loneliness and Education Variables
+# Loneliness questions: Column KM "SOCIAL_COMPANION" (SC1_A), Column KN "SOCIAL_LEFTOUT"(SC2), Column KO "SOCIAL_ISOLATED"(SC3)
+# Exclude: "." (missing / period) and 77, 98, 99
+# Recode: 1 → "Not Lonely"; 2 or 3 → "Lonely"
 
-# ── 3c. Binary recode ─────────────────────────────────────────
-# chas_clean <- chas_clean %>%
-#   mutate(
-#     lone_q1_bin = if_else(lone_q1 == 1, "Did Not Experience", "Experienced"),
-#     lone_q2_bin = if_else(lone_q2 == 1, "Did Not Experience", "Experienced"),
-#     lone_q3_bin = if_else(lone_q3 == 1, "Did Not Experience", "Experienced"),
-#
-#     # Factor versions (useful for modelling / plotting)
-#     lone_q1_fct = factor(lone_q1_bin,
-#                          levels = c("Did Not Experience", "Experienced")),
-#     lone_q2_fct = factor(lone_q2_bin,
-#                          levels = c("Did Not Experience", "Experienced")),
-#     lone_q3_fct = factor(lone_q3_bin,
-#                          levels = c("Did Not Experience", "Experienced"))
-#   )
+# Convert to numeric, converting "." to NA 
+chas1 <- chas %>%
+  mutate(across(c(SOCIAL_COMPANION, SOCIAL_LEFTOUT, SOCIAL_ISOLATED),
+                ~ as.numeric(.x)))
 
-# cat("\n=== Binary Loneliness Recode – Value Counts ===\n")
-# for (q in c("lone_q1_bin", "lone_q2_bin", "lone_q3_bin")) {
-#   cat(sprintf("\n%s:\n", q))
-#   print(table(chas_clean[[q]], useNA = "always"))
-# }
+# Exclude rows where any loneliness question = NA or 77 or 98 or 99
+ n_before <- nrow(chas1)
 
-# -- 3d. Education binary recode -----------------------------------------------
-# Original CHAS education categories (adjust numeric values to match your codebook):
+ chas_clean <- chas1 %>%
+      filter(
+        !is.na(SOCIAL_COMPANION), !SOCIAL_COMPANION %in% c(77, 98, 99),
+        !is.na(SOCIAL_LEFTOUT), !SOCIAL_LEFTOUT %in% c(77, 98, 99),
+        !is.na(SOCIAL_ISOLATED), !SOCIAL_ISOLATED %in% c(77, 98, 99)
+      )
+
+n_after <- nrow(chas_clean)
+cat(n_before)
+cat(n_before - n_after)
+cat(n_after)
+chas_clean$SOCIAL_COMPANION
+# Binary recode (bin)
+ chas_clean <- chas_clean %>%
+   mutate(
+     SOCIAL_COMPANION_bin = if_else(SOCIAL_COMPANION == 1, "Not Lonely", "Lonely"),
+     SOCIAL_LEFTOUT_bin = if_else(SOCIAL_LEFTOUT == 1, "Not Lonely", "Lonely"),
+     SOCIAL_ISOLATED_bin = if_else(SOCIAL_ISOLATED == 1, "Not Lonely", "Lonely"),
+
+     # Factor versions
+     SOCIAL_COMPANION_fct = factor(SOCIAL_COMPANION_bin,
+                          levels = c("Not Lonely", "Lonely")),
+     SOCIAL_LEFTOUT_fct = factor(SOCIAL_LEFTOUT_bin,
+                          levels = c("Not Lonely", "Lonely")),
+     SOCIAL_ISOLATED_fct = factor(SOCIAL_ISOLATED_bin,
+                          levels = c("Not Lonely", "Lonely"))
+   )
+cat(chas_clean$SOCIAL_COMPANION_bin)
+chas_clean1 <- chas_clean %>%
+  mutate(
+    SOCIAL_COMPANION_bin = ifelse(SOCIAL_COMPANION_bin == "Not Lonely", 1, 0),
+    SOCIAL_LEFTOUT_bin   = ifelse(SOCIAL_LEFTOUT_bin   == "Not Lonely", 1, 0),
+    SOCIAL_ISOLATED_bin  = ifelse(SOCIAL_ISOLATED_bin  == "Not Lonely", 1, 0)
+  )
+#----------------------------------------------------------------------------------------------------------------------- 
+ 
+# Education binary re-code
+# Original CHAS education categories
 #   1 = Less than high school
 #   2 = High school diploma or GED
-#   3 = Some college or technical school
-#   4 = College graduate (Bachelor's degree)
-#   5 = Post-graduate degree
+#.  3 = Some College (no degree)
+#   4 = Associate's Degree
+#   5 = College graduate (Bachelor's degree)
+#   6 = Post-graduate degree
 #
 # Recode: 1-3 -> "No college degree"
-#         4-5 -> "College degree or more"
+#         4-6 -> "College degree or more"
 
-# chas_clean <- chas_clean %>%
-#   mutate(
-#     education_bin = case_when(
-#       education %in% 1:3 ~ "No college degree",
-#       education %in% 4:5 ~ "College degree or more",
-#       TRUE               ~ NA_character_
-#     ),
-#     education_fct = factor(education_bin,
-#                            levels = c("No college degree", "College degree or more"))
-#   )
+ chas_clean <- chas_clean %>%
+   mutate(
+     education_bin = case_when(
+       EDUCATION %in% 1:3 ~ "No college degree",
+       EDUCATION %in% 4:6 ~ "College degree or more",
+       TRUE               ~ NA_character_
+     ),
+     education_fct = factor(education_bin,
+                            levels = c("No college degree", "College degree or more"))
+   )
 
-# cat("\n=== Education Binary Recode – Value Counts ===\n")
-# print(table(chas_clean$education_bin, useNA = "always"))
+ 
+ print(table(chas_clean$education_bin, useNA = "always"))
+
+ #visulaization of eduaction distribution
+ ggplot(chas_clean, aes(x = education_bin)) +
+   geom_bar(fill = "lightblue", colour = "white") +
+   labs(title    = "Education Category Distribution",
+        x        = "Education Category",
+        y        = "Count",
+        caption  = "") +
+   theme_minimal()
+
+#----------------------------------------------------------------------------------------------------------- 
+  
+ #Age distribution examination and Categorization into age_cat variable
+ summary(chas_clean$AGE)
+ 
+ #uncategorized age distribution plot
+ ggplot(chas_clean, aes(x = AGE)) +
+   geom_histogram(binwidth = 1,) +
+   xlim(1, 100) +
+   labs(title = "Age Distribution",
+        x = "Age",
+        y = "Count",
+        caption = "Min=1, Median=48, Mean=48.78, Max=444") +
+   theme_minimal()
+ 
+ #categorization
+ chas_clean <- chas_clean %>%
+   mutate(age_cat = case_when(
+     AGE >= 1 & AGE <= 10 ~ "<1-10",
+     AGE >= 11 & AGE <= 17 ~ "11-17",
+     AGE >= 18 & AGE <= 26 ~ "18-26",
+     AGE >= 27 & AGE <= 43 ~ "27-43",
+     AGE >= 44 & AGE <= 59 ~ "44-59",
+     AGE >= 60 & AGE <= 74 ~ "60-74",
+     AGE >= 75 ~ "75+"
+   ))
+ 
+table(chas_clean$age_cat)
+
+#Categorized age dist
+ggplot(chas_clean, aes(x = age_cat)) +
+  geom_bar(fill = "lightblue", colour = "white") +
+  labs(title    = "Age Distribution of CHAS Respondents",
+       x        = "Age Category",
+       y        = "Count",
+       caption  = "<1-10 11-17 18-26 27-43 44-59 60-74   75+ 
+  693   700   520  2065  2085  2334   880 ") +
+  theme_minimal()
+
+#----------------------------------------------------------------------------------------------------------
+
+#Race Categorization and variable creation
+chas_clean <- chas_clean %>% 
+  mutate(Native_American = RACE1,
+         Asian = RACE2,
+         Black_or_African_American = RACE3,
+         Hispanic = RACE4,
+         Middle_Eastern = RACE5,
+         Pacific_Islander = RACE6,
+         White = RACE7,
+         Other = RACE8)
+
+chas_clean <- chas_clean %>% 
+  mutate(n_race = rowSums(cbind(
+    Native_American == 1,
+    Asian == 1,
+    Black_or_African_American == 1,
+    Hispanic == 1,
+    Middle_Eastern == 1,
+    Pacific_Islander == 1,
+    White == 1,
+    Other == 1)),
+    race_exclusive = case_when(
+      n_race >= 2 ~ "Multiracial",
+      n_race == 0 ~ "Unknown",
+      Native_American == 1 ~ "American Indian or Alaskan native",
+      Asian == 1 ~ "Asian",
+      Black_or_African_American == 1 ~ "Black",
+      Hispanic == 1 ~ "Hispanic",
+      Middle_Eastern == 1 ~ "Middle Eastern",
+      Pacific_Islander == 1 ~ "Pacific Islander",
+      White == 1 ~ "White",
+      Other == 1~ "Other"))
+table(chas_clean$race_exclusive)
+
+ggplot(chas_clean, aes(x = race_exclusive)) +
+  geom_bar(fill = "lightblue", colour = "white") +
+  labs(title    = "Race Distribution of CHAS Respondents",
+       x        = "Reported Race",
+       y        = "Count",
+       caption  = "") +
+  theme_minimal()
+
+#-----------------------------------------------------------------------------------------------------------
+
+#Health Status Categorization
+chas_clean <-chas_clean %>% 
+  mutate(health_status_cat = factor(
+    HEALTH_STATUS,
+    levels = c(1,2,3,4, 5),
+    labels = c("Excellent", "Very Good", "Good", "Fair", "Poor")))
+table(chas_clean$health_status_cat)
+
+#Health Status dist visulaization
+ggplot(chas_clean, aes(x = health_status_cat)) +
+  geom_bar(fill = "lightblue", colour = "white") +
+  labs(title    = "Health Status Distribution of CHAS Respondents",
+       x        = "Reported Health Status",
+       y        = "Count",
+       caption  = "") +
+  theme_minimal()
+
+#---------------------------------------------------------------------------------------------
+
+#Gender Categorization
+chas_clean <- chas_clean %>% 
+  mutate(gender_cat = factor(
+    GENDER,
+    levels = c(1,2,3,4,5),
+    labels = c("Female", "Male", "Transgender", "Prefer different term", "Not provided")))
+table(chas_clean$gender_cat)
+
+#Gender dist visualization
+ggplot(chas_clean, aes(x = gender_cat)) +
+  geom_bar(fill = "lightblue", colour = "white") +
+  labs(title    = "Gender Distribution of CHAS Respondents",
+       x        = "Reported Gender",
+       y        = "Count",
+       caption  = "") +
+  theme_minimal()
+
+#--------------------------------------------------------------------------------
+
+#Sexuality Categorization
+chas_clean <- chas_clean %>% 
+  mutate(straight = SO3_1,
+         gay = SO3_2,
+         bisexual = SO3_3,
+         other = SO3_4)
+
+chas_clean <- chas_clean %>% 
+  mutate(n_sex = rowSums(cbind(
+    SO3_1 == 1,
+    SO3_2 == 1,
+    SO3_3 == 1,
+    SO3_4 == 1)),
+    sex_exclusive = case_when(
+      n_sex >= 2 ~ "More than 1 identity",
+      n_sex == 0 ~ "No response",
+      straight == 1 ~ "Straight",
+      gay == 1 ~ "Gay",
+      bisexual == 1 ~ "Bisexual",
+      other == 1 ~ "Other Identity"))
+table(chas_clean$sex_exclusive)
+
+#--------------------------------------------------------------------------------
+
+#Urban Characterization
+chas_clean <-chas_clean %>% 
+  mutate(urban_cat = factor(
+    URBAN,
+    levels = c(1,0),
+    labels = c("Urban", "Rural")))
+table(chas_clean$urban_cat)
+
+
+#Table 1
+library(table1)
+table1(~ urban_cat + AGE + age_cat + gender_cat + race_exclusive + sex_exclusive + health_status_cat| SOCIAL_LEFTOUT_fct,
+       data = chas_clean
+)
